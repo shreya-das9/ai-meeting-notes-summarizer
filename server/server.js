@@ -3,7 +3,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
 import { z } from 'zod';
-import OpenAI from 'openai';
 import Groq from 'groq-sdk';
 
 dotenv.config();
@@ -12,20 +11,12 @@ const app = express();
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' }));
 app.use(express.json({ limit: '2mb' }));
 
-// --- LLM client selection ---
-const PROVIDER = (process.env.PROVIDER || 'openai').toLowerCase();
-const MODEL = process.env.MODEL || (PROVIDER === 'groq' ? 'llama-3.1-70b-versatile' : 'gpt-4o-mini');
-
-let llmClient = null;
-if (PROVIDER === 'openai') {
-  if (!process.env.OPENAI_API_KEY) throw new Error('Missing OPENAI_API_KEY');
-  llmClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-} else if (PROVIDER === 'groq') {
-  if (!process.env.GROQ_API_KEY) throw new Error('Missing GROQ_API_KEY');
-  llmClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
-} else {
-  throw new Error('Unsupported PROVIDER. Use "openai" or "groq".');
+// --- LLM client (Groq only) ---
+if (!process.env.GROQ_API_KEY) {
+  throw new Error('Missing GROQ_API_KEY – set it in your environment variables.');
 }
+const llmClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const MODEL = process.env.MODEL || 'llama-3.1-70b-versatile';
 
 const systemPrompt = `You are a world-class meeting-notes summarizer. Given a raw transcript and a user instruction, produce a structured, factual summary. Always include:
 - Title
@@ -49,7 +40,6 @@ app.post('/api/summarize', async (req, res) => {
 
     const userPrompt = `Instruction: ${instruction}\n\nTranscript:\n${transcript}`;
 
-    let content = '';
     const resp = await llmClient.chat.completions.create({
       model: MODEL,
       temperature: 0.3,
@@ -58,8 +48,8 @@ app.post('/api/summarize', async (req, res) => {
         { role: 'user', content: userPrompt }
       ]
     });
-    content = resp.choices?.[0]?.message?.content || '';
 
+    const content = resp.choices?.[0]?.message?.content || '';
     res.json({ summary: content });
   } catch (err) {
     console.error(err);
@@ -67,7 +57,7 @@ app.post('/api/summarize', async (req, res) => {
   }
 });
 
-// --- Email Endpoint (frontend expects /api/send-email) ---
+// --- Email Endpoint ---
 app.post('/api/send-email', async (req, res) => {
   try {
     const schema = z.object({
@@ -96,7 +86,6 @@ app.post('/api/send-email', async (req, res) => {
         auth: { user: process.env.MAILTRAP_USER, pass: process.env.MAILTRAP_PASS }
       });
     } else {
-      // Ethereal (default) – great for local testing
       const testAccount = await nodemailer.createTestAccount();
       transporter = nodemailer.createTransport({
         host: 'smtp.ethereal.email',
@@ -113,7 +102,7 @@ app.post('/api/send-email', async (req, res) => {
       html
     });
 
-    const previewUrl = nodemailer.getTestMessageUrl(info); // Ethereal preview link
+    const previewUrl = nodemailer.getTestMessageUrl(info);
     res.json({ ok: true, messageId: info.messageId, previewUrl });
   } catch (err) {
     console.error(err);
