@@ -5,11 +5,17 @@ import nodemailer from 'nodemailer';
 import { z } from 'zod';
 import Groq from 'groq-sdk';
 
+import path from "path";
+import { fileURLToPath } from "url";
+
 dotenv.config();
 
 const app = express();
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' }));
 app.use(express.json({ limit: '2mb' }));
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // --- LLM client (Groq only) ---
 if (!process.env.GROQ_API_KEY) {
@@ -108,6 +114,13 @@ app.post('/api/send-email', async (req, res) => {
     console.error(err);
     res.status(400).json({ error: err.message || 'Failed to send email' });
   }
+});
+
+// --- Serve frontend build (AFTER APIs) ---
+app.use(express.static(path.join(__dirname, "dist")));
+
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
 
 const port = process.env.PORT || 4000;
